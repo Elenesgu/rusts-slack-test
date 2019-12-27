@@ -1,0 +1,8 @@
+# Output
+/target
+
+# Cargo
+Cargo.lock
+
+# Editor
+.vscode/
