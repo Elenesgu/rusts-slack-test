@@ -1,11 +1,36 @@
 use slack;
 use slack::{Event, RtmClient};
+use slack::api::{Message, MessageStandard};
 
 struct MyHandler;
 
 impl MyHandler {
     fn send(&mut self, cli: &RtmClient, event: Event) {
-        ;
+        let to_send_channel;
+        let to_send_msg;
+
+        match event {
+            Event::Message(message) => {
+                match *message {
+                    Message::Standard(MessageStandard {
+                                          ref channel,
+                                          ref text,
+                                          ..
+                                      }) => {
+                        match channel {
+                            Some(s) => to_send_channel = s.clone(),
+                            None =>  panic!("channel invalid."),
+                        }
+                        to_send_msg = "Hello";
+                        println!("sended: {:?}", text);
+                    }
+                    _ => panic!("Message decoded into incorrect variant."),
+                }
+            }
+            _ => panic!("Event decoded into incorrect variant."),
+        }
+
+        cli.sender().send_message(&*to_send_channel, to_send_msg).expect("foo");
     }
 }
 
@@ -13,11 +38,8 @@ impl MyHandler {
 impl slack::EventHandler for MyHandler {
 
     fn on_event(&mut self, cli: &RtmClient, event: Event) {
-        println!("on_event(event: {:?})", event);
         match event {
-            Event::Message(s) => MyHandler::send(self, cli, event),
-            //                                              ^ FIXME
-            //                                              want to pass reference of event
+            Event::Message(_) => MyHandler::send(self, cli, event),
             _ => {},
         }        
     }
