@@ -15,3 +15,5 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
+
+// curl 'https://slack.com/api/chat.postMessage' -H 'Authorization: Bearer SECRET' -H 'Content-type: application/json; charset=utf-8' -d '{"channel": "CS2AVF83X", "text": "hello, world"}'
