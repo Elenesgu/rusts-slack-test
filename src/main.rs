@@ -9,40 +9,24 @@ struct MyObj {
     text: String,
 }
 
-
-// async fn json_handler((params, req): (web::Json<MyObj>, HttpRequest)) -> Result<HttpResponse> {
-//     println!("JSON: {:?}", params);
-//     println!("REQ: {:?}", req);
-
-//         // response
-//     Ok(HttpResponse::build(StatusCode::OK)
-//         .content_type("text/html; charset=utf-8")
-//         .body("include_str!(\"../static/welcome.html\")"))
-// }
-
-async fn json_handler((params, req): (web::Json<MyObj>, HttpRequest)) -> Result<HttpResponse> {
-    println!("JSON: {:?}", params);
+async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> {
     println!("REQ: {:?}", req);
 
-        // response
-    Ok(HttpResponse::build(StatusCode::OK)
-        .content_type("text/html; charset=utf-8")
-        .body("include_str!(\"../static/welcome.html\")"))
-}
-
-async fn normal_handler(req: HttpRequest) -> Result<HttpResponse> {
-    println!("REQ: {:?}", req);
-    let content_str;
-
-    if let Some(i) = req.headers().get("content-type") {
-        content_str = i.to_str().unwrap();
-    } else {
-        content_str = "";
-    }
+    let content_str =
+        if let Some(i) = req.headers().get("content-type") {
+            i.to_str().unwrap()
+        } else {
+            ""
+        };
 
     println!("type: {:?}", content_str);
+    println!("body: {:?}", body);
 
     if content_str.contains("json") {
+
+        let json_body: MyObj = serde_json::from_str(&body)?;
+        println!("json body: {:?}", json_body);
+
         // response
         Ok(HttpResponse::build(StatusCode::OK)
             .content_type("text/html; charset=utf-8")
