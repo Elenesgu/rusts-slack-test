@@ -4,18 +4,25 @@ use actix_web::{web, App, HttpRequest, HttpServer, HttpResponse, Result};
 use serde_derive::{Deserialize, Serialize};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MyObj {
-    channel: String,
-    text: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct VerificationEvent {
-    token: String,
-    challenge: String,
-    #[serde(rename = "type")]
-    ty: String,
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+pub enum SlackEvent {
+    /// https://api.slack.com/events/url_verification
+    ///
+    /// This event is sent from Slack when the url is first entered.
+    /// {
+    ///     "token": "TOKEN_VALUE",
+    ///     "challenge": "SOME_VALUE",
+    ///     "type": "url_verification"
+    /// }
+    ///
+    /// You should reposnd with
+    ///
+    /// HTTP 200 OK
+    /// Content-type: application/x-www-form-urlencoded
+    /// challenge=SOME_VALUE
+    UrlVerification { token: String, challenge: String }
 }
 
 async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> {
@@ -33,13 +40,20 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
 
     if content_str.contains("json") {
 
-        let json_body: MyObj = serde_json::from_str(&body)?;
-        println!("json body: {:?}", json_body);
+        let posted_event: SlackEvent = serde_json::from_str(&body)?;
+        println!("json body: {:?}", posted_event);
 
-        // response
-        Ok(HttpResponse::build(StatusCode::OK)
-            .content_type("text/html; charset=utf-8")
-            .body("foo"))
+        match posted_event {
+            SlackEvent::UrlVerification {
+                ref challenge,
+                ..
+            } => {
+                Ok(HttpResponse::build(StatusCode::OK)
+                    .content_type("application/x-www-form-urlencoded")
+                    .body(challenge)
+                )
+            },
+        }
     } else {
         // response
         Ok(HttpResponse::build(StatusCode::OK)
@@ -67,9 +81,8 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(normal_handler))
     });
 
-    server.bind_openssl("0.0.0.0:14476", ssl_builder)?
-          .bind("0.0.0.0:14475")?.
-          run()
+    server.bind_openssl("0.0.0.0:14475", ssl_builder)?
+          .run()
           .await
 }
 
