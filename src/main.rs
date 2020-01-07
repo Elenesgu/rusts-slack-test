@@ -21,23 +21,47 @@ pub struct Block {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct MessageChannels {
-    client_msg_id: String,
-    channel: String,
+pub struct Reaction {
+    name: String,
+    count: u32,
+    users: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Edited {
     user: String,
-    text: String,
     ts: String,
-    team: String,
-    event_ts: String,
-    channel_type: String,
-    blocks: Vec<Block>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Message {
+    client_msg_id: Option<String>,
+    channel: Option<String>,
+    user: Option<String>,
+    text: Option<String>,
+    ts: String,
+    team: Option<String>,
+    event_ts: Option<String>,
+    channel_type: Option<String>,
+    blocks: Option<Vec<Block>>,
+    subtype: Option<String>,
+    deleted_ts: Option<String>,
+    hidden: Option<bool>,
+    is_starred: Option<bool>,
+    pinned_to: Option<Vec<String>>,
+    reactions: Option<Vec<Reaction>>,
+    edited: Option<Edited>,
+    message: Option<Box<Message>>,
+    previous_message: Option<Box<Message>>,
+    user_team: Option<String>,
+    source_team: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 pub enum InternalEvent {
-    Message(MessageChannels),
+    Message(Message),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -102,7 +126,7 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
                         .body(challenge)
                 )
             },
-            SlackEvent::EventCallback(callback) => {                
+            SlackEvent::EventCallback(_callback) => {                
                 Ok(
                     HttpResponse::build(StatusCode::OK)
                         .content_type("text/html; charset=utf-8")
@@ -119,50 +143,7 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
 }
 
 #[actix_rt::main]
-async fn main() -> std::io::Result<()> {
-
-    // let test_event: SlackEvent = serde_json::from_str(r##"
-    // {
-    //     "token": "5Osb0LJ3UCgtnl4bB9x7sH9J",
-    //     "team_id": "TS4GNR4CE",
-    //     "api_app_id": "AS2AW82HK",
-    //     "event": {
-    //       "client_msg_id": "17ccbdff-3430-45e4-8f69-4d50057c3939",
-    //       "type": "message",
-    //       "text": "Put Message",
-    //       "user": "US2AVEYS1",
-    //       "ts": "1578374467.000900",
-    //       "team": "TS4GNR4CE",
-    //       "blocks": [
-    //         {
-    //           "type": "rich_text",
-    //           "block_id": "SBBt9",
-    //           "elements": [
-
-    //             {
-    //                 "type": "rich_text_section",
-    //                 "elements": [
-    //                   {
-    //                     "type": "text",
-    //                     "text": "Put Message"
-    //                   }
-    //                 ]
-    //             }
-    //           ]
-    //         }
-    //       ],
-    //       "channel": "CS2AVF83X",
-    //       "event_ts": "1578374467.000900",
-    //       "channel_type": "channel"
-    //     },
-    //     "type": "event_callback",
-    //     "event_id": "EvS1FR27ND",
-    //     "event_time": 1578374467,
-    //     "authed_users": [
-    //       "URS3HL8SD"
-    //     ]
-    //   }"##).unwrap();
-    
+async fn main() -> std::io::Result<()> {    
     let mut ssl_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     
     ssl_builder
