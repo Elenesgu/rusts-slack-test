@@ -7,6 +7,53 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
+pub enum BlockElement {
+    RichTextSection { elements: Vec<Box<BlockElement>> },
+    Text { text: String },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Block {
+    #[serde(rename = "type")]
+    ty: String,
+    block_id: String,
+    elements: Vec<BlockElement>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MessageChannels {
+    client_msg_id: String,
+    channel: String,
+    user: String,
+    text: String,
+    ts: String,
+    team: String,
+    event_ts: String,
+    channel_type: String,
+    blocks: Vec<Block>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+pub enum InternalEvent {
+    Message(MessageChannels),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EventCallback {
+    token: String,
+    team_id: String,
+    api_app_id: String,
+    event: InternalEvent,
+    authed_users: Vec<String>,
+    event_id: String,
+    event_time: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
 pub enum SlackEvent {
     /// https://api.slack.com/events/url_verification
     ///
@@ -22,7 +69,8 @@ pub enum SlackEvent {
     /// HTTP 200 OK
     /// Content-type: application/x-www-form-urlencoded
     /// challenge=SOME_VALUE
-    UrlVerification { token: String, challenge: String }
+    UrlVerification { token: String, challenge: String },
+    EventCallback(EventCallback),
 }
 
 async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> {
@@ -41,22 +89,30 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
     if content_str.contains("json") {
 
         let posted_event: SlackEvent = serde_json::from_str(&body)?;
-        println!("json body: {:?}", posted_event);
+        println!("json body: {:#?}", posted_event);
 
         match posted_event {
             SlackEvent::UrlVerification {
                 ref challenge,
                 ..
             } => {
-                Ok(HttpResponse::build(StatusCode::OK)
-                    .content_type("application/x-www-form-urlencoded")
-                    .body(challenge)
+                Ok(
+                    HttpResponse::build(StatusCode::OK)
+                        .content_type("application/x-www-form-urlencoded")
+                        .body(challenge)
+                )
+            },
+            SlackEvent::EventCallback(callback) => {                
+                Ok(
+                    HttpResponse::build(StatusCode::OK)
+                        .content_type("text/html; charset=utf-8")
+                        .body(body)
                 )
             },
         }
     } else {
         // response
-        Ok(HttpResponse::build(StatusCode::OK)
+        Ok(HttpResponse::build(StatusCode::BAD_REQUEST)
             .content_type("text/html; charset=utf-8")
             .body(body))
     }
@@ -65,6 +121,48 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
 
+    // let test_event: SlackEvent = serde_json::from_str(r##"
+    // {
+    //     "token": "5Osb0LJ3UCgtnl4bB9x7sH9J",
+    //     "team_id": "TS4GNR4CE",
+    //     "api_app_id": "AS2AW82HK",
+    //     "event": {
+    //       "client_msg_id": "17ccbdff-3430-45e4-8f69-4d50057c3939",
+    //       "type": "message",
+    //       "text": "Put Message",
+    //       "user": "US2AVEYS1",
+    //       "ts": "1578374467.000900",
+    //       "team": "TS4GNR4CE",
+    //       "blocks": [
+    //         {
+    //           "type": "rich_text",
+    //           "block_id": "SBBt9",
+    //           "elements": [
+
+    //             {
+    //                 "type": "rich_text_section",
+    //                 "elements": [
+    //                   {
+    //                     "type": "text",
+    //                     "text": "Put Message"
+    //                   }
+    //                 ]
+    //             }
+    //           ]
+    //         }
+    //       ],
+    //       "channel": "CS2AVF83X",
+    //       "event_ts": "1578374467.000900",
+    //       "channel_type": "channel"
+    //     },
+    //     "type": "event_callback",
+    //     "event_id": "EvS1FR27ND",
+    //     "event_time": 1578374467,
+    //     "authed_users": [
+    //       "URS3HL8SD"
+    //     ]
+    //   }"##).unwrap();
+    
     let mut ssl_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     
     ssl_builder
