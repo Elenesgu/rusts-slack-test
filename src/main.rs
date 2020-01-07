@@ -1,7 +1,7 @@
 
 use actix_web::http::{StatusCode};
 use actix_web::{web, App, HttpRequest, HttpServer, HttpResponse, Result};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -14,47 +14,47 @@ pub enum BlockElement {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Block {
-    #[serde(rename = "type")]
-    ty: String,
     block_id: String,
     elements: Vec<BlockElement>,
+    #[serde(rename = "type")]
+    ty: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Reaction {
-    name: String,
     count: u32,
+    name: String,
     users: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Edited {
-    user: String,
     ts: String,
+    user: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Message {
-    client_msg_id: Option<String>,
-    channel: Option<String>,
-    user: Option<String>,
-    text: Option<String>,
-    ts: String,
-    team: Option<String>,
-    event_ts: Option<String>,
-    channel_type: Option<String>,
     blocks: Option<Vec<Block>>,
-    subtype: Option<String>,
+    channel: Option<String>,
+    channel_type: Option<String>,
+    client_msg_id: Option<String>,
     deleted_ts: Option<String>,
+    edited: Option<Edited>,
+    event_ts: Option<String>,
     hidden: Option<bool>,
     is_starred: Option<bool>,
-    pinned_to: Option<Vec<String>>,
-    reactions: Option<Vec<Reaction>>,
-    edited: Option<Edited>,
     message: Option<Box<Message>>,
+    pinned_to: Option<Vec<String>>,
     previous_message: Option<Box<Message>>,
-    user_team: Option<String>,
+    reactions: Option<Vec<Reaction>>,
     source_team: Option<String>,
+    subtype: Option<String>,
+    team: Option<String>,
+    text: Option<String>,
+    ts: String,
+    user: Option<String>,
+    user_team: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -66,13 +66,13 @@ pub enum InternalEvent {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct EventCallback {
-    token: String,
-    team_id: String,
     api_app_id: String,
-    event: InternalEvent,
     authed_users: Vec<String>,
+    event: InternalEvent,
     event_id: String,
     event_time: u64,
+    team_id: String,
+    token: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -93,8 +93,8 @@ pub enum SlackEvent {
     /// HTTP 200 OK
     /// Content-type: application/x-www-form-urlencoded
     /// challenge=SOME_VALUE
-    UrlVerification { token: String, challenge: String },
     EventCallback(EventCallback),
+    UrlVerification { token: String, challenge: String },
 }
 
 async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> {
