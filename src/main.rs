@@ -1,8 +1,11 @@
-
+use actix_rt::System;
 use actix_web::http::{StatusCode};
 use actix_web::{web, App, HttpRequest, HttpServer, HttpResponse, Result};
-use serde_derive::Deserialize;
+use serde_derive::{Serialize, Deserialize};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use std::sync::mpsc;
+use std::thread;
+use std::env;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -97,7 +100,17 @@ pub enum SlackEvent {
     UrlVerification { token: String, challenge: String },
 }
 
-async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> {
+struct AppState {
+    sender: mpsc::Sender::<EventCallback>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PostMessage {
+    channel: String,
+    text: String,
+}
+
+async fn normal_handler(req: HttpRequest, body: String, state: web::Data<AppState>) -> Result<HttpResponse> {
     println!("REQ: {:?}", req);
 
     let content_str =
@@ -113,7 +126,6 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
     if content_str.contains("json") {
 
         let posted_event: SlackEvent = serde_json::from_str(&body)?;
-        println!("json body: {:#?}", posted_event);
 
         match posted_event {
             SlackEvent::UrlVerification {
@@ -126,7 +138,8 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
                         .body(challenge)
                 )
             },
-            SlackEvent::EventCallback(_callback) => {                
+            SlackEvent::EventCallback(event_callback) => {
+                state.sender.send(event_callback).unwrap();
                 Ok(
                     HttpResponse::build(StatusCode::OK)
                         .content_type("text/html; charset=utf-8")
@@ -143,26 +156,90 @@ async fn normal_handler(req: HttpRequest, body: String) -> Result<HttpResponse> 
 }
 
 #[actix_rt::main]
-async fn main() -> std::io::Result<()> {    
-    let mut ssl_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-    
-    ssl_builder
-        .set_private_key_file("PRIVATE_KEY.pem", SslFiletype::PEM)
-        .unwrap();
-    
-    ssl_builder
-        .set_certificate_chain_file("PUBLIC_KEY.pem")
-        .unwrap();
+async fn main() {
+    let secret_token = match env::var("SLACK_BOT_TOKEN") {
+        Ok(val) => val,
+        Err(_e) => panic!("Secret bot token is not given."),
+    };
 
-    let server = HttpServer::new(|| {
-        App::new()
-            .route("/", web::post().to(normal_handler))
-            .route("/", web::get().to(normal_handler))
+    let (slack_event_sender, slack_event_reciever) = mpsc::channel::<EventCallback>();
+
+    let slack_server_thrd = thread::spawn(move || {
+        let sys = System::new("slack-listner");
+        
+        let mut ssl_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    
+        ssl_builder
+            .set_private_key_file("PRIVATE_KEY.pem", SslFiletype::PEM)
+            .unwrap();
+        
+        ssl_builder
+            .set_certificate_chain_file("PUBLIC_KEY.pem")
+            .unwrap();
+
+        HttpServer::new(move || {
+            App::new()
+                .data(AppState {
+                    sender: slack_event_sender.clone(),
+                })
+                .route("/", web::post().to(normal_handler))
+                .route("/", web::get().to(normal_handler))
+        })
+        .bind_openssl("0.0.0.0:14475", ssl_builder)?
+        .run();
+
+        sys.run()
     });
 
-    server.bind_openssl("0.0.0.0:14475", ssl_builder)?
-          .run()
-          .await
+    println!("{:?}", secret_token);
+
+    let slack_event_handle_thrd = thread::spawn(move || {
+        let event_listner = slack_event_reciever;
+        //TODO: async?
+        loop {
+            let slack_event_wrap: EventCallback = event_listner.recv().unwrap();
+            println!("{:#?}", slack_event_wrap);
+
+            //TODO: remove hardcoded value
+            let bot_id = "URS3HL8SD".to_string();
+
+            match slack_event_wrap.event {
+                InternalEvent::Message(slack_msg) => {
+                    if slack_msg.subtype == None {
+                        match &slack_msg.user {
+                            Some(ref user_list) => {
+                                if user_list.contains(&bot_id) {
+                                    continue;
+                                }
+                            }
+                            None => {
+                                continue;
+                            }
+                        }
+
+                        let reply = PostMessage {
+                            channel: slack_msg.channel.unwrap(),
+                            text: "hello, world".to_string(),
+                        };
+                        println!("To send struct : {:#?}", reply);
+
+                        let request = reqwest::blocking::Client::new()
+                            .post("https://slack.com/api/chat.postMessage")
+                            .header("Content-type", "application/json; charset=utf-8")
+                            .header("Authorization", "Bearer ".to_string() + &secret_token)
+                            .json(&reply);
+
+                        println!("To send request: {:#?}", request);
+                        let res = request.send();
+                        println!("respond: {:#?}", res);
+                    }
+                },
+            }
+        }
+    });
+
+    let _res = slack_server_thrd.join();
+    let _res2 = slack_event_handle_thrd.join();
 }
 
 // curl 'https://slack.com/api/chat.postMessage' -H 'Authorization: Bearer SECRET' -H 'Content-type: application/json; charset=utf-8' -d '{"channel": "CS2AVF83X", "text": "hello, world"}'
