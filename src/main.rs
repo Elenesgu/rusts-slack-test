@@ -2,6 +2,7 @@ use actix::System;
 use actix::prelude::*;
 use actix_web::http::{StatusCode};
 use actix_web::{web, App, HttpRequest, HttpServer, HttpResponse, Result};
+use ctrlc;
 use serde_derive::{Serialize};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
@@ -15,6 +16,7 @@ impl Message for slack::EventCallback {
 
 struct SlackEventActor {
     secret_token: String,
+    slack_client: reqwest::blocking::Client,
 }
 
 impl Actor for SlackEventActor {
@@ -46,17 +48,14 @@ impl Handler<slack::EventCallback> for SlackEventActor {
                         channel: slack_msg.channel.unwrap(),
                         text: "hello, world".to_string(),
                     };
-                    println!("To send struct : {:#?}", reply);
 
-                    let request = reqwest::blocking::Client::new()
+                    let request = self.slack_client
                         .post("https://slack.com/api/chat.postMessage")
                         .header("Content-type", "application/json; charset=utf-8")
                         .header("Authorization", "Bearer ".to_string() + &self.secret_token)
                         .json(&reply);
 
-                    println!("To send request: {:#?}", request);
-                    let res = request.send();
-                    println!("respond: {:#?}", res);
+                    request.send();
                 }
             },
         }
@@ -75,17 +74,12 @@ struct PostMessage {
 }
 
 async fn normal_handler(req: HttpRequest, body: String, state: web::Data<AppState>) -> Result<HttpResponse> {
-    println!("REQ: {:?}", req);
-
     let content_str =
         if let Some(i) = req.headers().get("content-type") {
             i.to_str().unwrap()
         } else {
             ""
         };
-
-    println!("type: {:?}", content_str);
-    println!("body: {:?}", body);
 
     if content_str.contains("json") {
 
@@ -130,9 +124,11 @@ fn main() -> std::io::Result<()> {
 
     let slack_event_actor = SyncArbiter::start(1, move || SlackEventActor {
         secret_token: secret_token.clone(),
+        slack_client: reqwest::blocking::Client::new(),
     });
 
-    std::thread::spawn(move || {
+
+    let _ = std::thread::spawn(move || {
         let system = System::new("http");
 
         let mut ssl_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
@@ -156,8 +152,13 @@ fn main() -> std::io::Result<()> {
             .bind_openssl("0.0.0.0:14475", ssl_builder).unwrap()
             .run();
 
-        let _ = system.run();
-    });    
+        system.run()
+    });
+
+    ctrlc::set_handler(move || {
+        println!("Try to stop HttpServer.");
+        std::process::exit(1);
+    }).expect("Fail to set Ctrl-C handler.");
         
     system.run()
 }

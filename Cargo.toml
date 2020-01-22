@@ -17,8 +17,7 @@ serde_derive = "1.0"
 
 openssl = "0.10"
 
-slack = "0.22.0"
-slack_api = "0.21.0"
-
 reqwest = { version = "0.10", features = ["json", "blocking"] }
 tokio = { version = "0.2.0", features = ["full"] }
+
+ctrlc = "3.0"
