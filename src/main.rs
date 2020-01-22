@@ -5,6 +5,7 @@ use actix_web::{web, App, HttpRequest, HttpServer, HttpResponse, Result};
 use ctrlc;
 use serde_derive::{Serialize};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use futures::executor;
 
 use std::env;
 
@@ -127,6 +128,7 @@ fn main() -> std::io::Result<()> {
         slack_client: reqwest::blocking::Client::new(),
     });
 
+    let (tx, rx) = std::sync::mpsc::channel();
 
     let _ = std::thread::spawn(move || {
         let system = System::new("http");
@@ -141,7 +143,7 @@ fn main() -> std::io::Result<()> {
             .set_certificate_chain_file("PUBLIC_KEY.pem")
             .unwrap();
 
-        HttpServer::new(move || {        
+        let srv = HttpServer::new(move || { 
             App::new()
                 .data(AppState {
                     sender: slack_event_actor.clone(),
@@ -152,12 +154,25 @@ fn main() -> std::io::Result<()> {
             .bind_openssl("0.0.0.0:14475", ssl_builder).unwrap()
             .run();
 
+        let _ = tx.send(srv);
+
         system.run()
     });
 
+    let srv = rx.recv().unwrap();
+    let main_sys = System::current();
+    let ctrl_c_pressed = std::sync::atomic::AtomicBool::new(false);
+
     ctrlc::set_handler(move || {
+        if ctrl_c_pressed.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("Force to stop program.");
+            std::process::exit(1);
+        }
+        ctrl_c_pressed.store(true, std::sync::atomic::Ordering::Relaxed);
         println!("Try to stop HttpServer.");
-        std::process::exit(1);
+        executor::block_on(srv.stop(true));
+        main_sys.stop();
+        println!("Stopped.");
     }).expect("Fail to set Ctrl-C handler.");
         
     system.run()
