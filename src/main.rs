@@ -164,11 +164,11 @@ fn main() -> std::io::Result<()> {
     let ctrl_c_pressed = std::sync::atomic::AtomicBool::new(false);
 
     ctrlc::set_handler(move || {
-        if ctrl_c_pressed.load(std::sync::atomic::Ordering::Relaxed) {
+        if ctrl_c_pressed.load(std::sync::atomic::Ordering::SeqCst) {
             println!("Force to stop program.");
             std::process::exit(1);
         }
-        ctrl_c_pressed.store(true, std::sync::atomic::Ordering::Relaxed);
+        ctrl_c_pressed.store(true, std::sync::atomic::Ordering::SeqCst);
         println!("Try to stop HttpServer.");
         executor::block_on(srv.stop(true));
         main_sys.stop();
