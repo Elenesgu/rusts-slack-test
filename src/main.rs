@@ -2,9 +2,15 @@ use actix::System;
 use actix::prelude::*;
 use actix_web::http::{StatusCode};
 use actix_web::{web, App, HttpRequest, HttpServer, HttpResponse, Result};
-use ctrlc;
+
 use serde_derive::{Serialize};
+
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+
+use ctrlc;
+use sha2::Sha256;
+use hmac::{Hmac, Mac};
+
 use futures::executor;
 
 use std::env;
@@ -16,7 +22,7 @@ impl Message for slack::EventCallback {
 }
 
 struct SlackEventActor {
-    secret_token: String,
+    bot_token: String,
     slack_client: reqwest::blocking::Client,
 }
 
@@ -53,7 +59,7 @@ impl Handler<slack::EventCallback> for SlackEventActor {
                     let request = self.slack_client
                         .post("https://slack.com/api/chat.postMessage")
                         .header("Content-type", "application/json; charset=utf-8")
-                        .header("Authorization", "Bearer ".to_string() + &self.secret_token)
+                        .header("Authorization", "Bearer ".to_string() + &self.bot_token)
                         .json(&reply);
 
                     request.send();
@@ -66,6 +72,7 @@ impl Handler<slack::EventCallback> for SlackEventActor {
 
 struct AppState {
     sender: Addr<SlackEventActor>,
+    signing_secret: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -74,13 +81,75 @@ struct PostMessage {
     text: String,
 }
 
+struct ByteBuf<'a>(&'a [u8]);
+
+impl<'a> std::fmt::LowerHex for ByteBuf<'a> {
+    fn fmt(&self, fmtr: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        for byte in self.0 {
+            fmtr.write_fmt(format_args!("{:02x}", byte))?;
+        }
+        Ok(())
+    }
+}
+
 async fn normal_handler(req: HttpRequest, body: String, state: web::Data<AppState>) -> Result<HttpResponse> {
+    println!("REQ: {:?}", req);
+    println!("Body: {:?}", body);
+
+
     let content_str =
         if let Some(i) = req.headers().get("content-type") {
             i.to_str().unwrap()
         } else {
             ""
         };
+
+    let slack_signature: &str =
+        if let Some(sig) = req.headers().get("X-Slack-Signature") {
+            sig.to_str().unwrap()
+        } else {
+            return Ok(
+                HttpResponse::Unauthorized().finish()
+            );
+        };
+
+    let slack_timestamp: &str =
+        if let Some(sig) = req.headers().get("X-Slack-Request-Timestamp") {
+            sig.to_str().unwrap()
+        } else {
+            return Ok(
+                HttpResponse::Unauthorized().finish()
+            );
+        };
+
+    {
+        let cur_timestamp = 
+            std::time::SystemTime::now().duration_since(
+                std::time::SystemTime::UNIX_EPOCH
+            )
+            .unwrap()
+            .checked_sub(
+                std::time::Duration::from_secs(slack_timestamp.parse::<u64>().unwrap())
+            );
+        println!("now: {:?}", cur_timestamp);
+        //TODO: check replay attack
+    }
+
+    let signature_base_string: String =
+        format!("v0:{}:{}", slack_timestamp, body);
+
+    let mut mac = Hmac::<Sha256>::new_varkey(state.signing_secret.as_bytes()).expect("");
+    mac.input(signature_base_string.as_bytes());
+
+    let calculated_signature = 
+        format!("v0={:02x}", ByteBuf(&mac.result().code().as_slice()));
+
+    if slack_signature != calculated_signature {
+        return Ok(
+            HttpResponse::Unauthorized().finish()
+        );
+    }
+    println!("Success to verify a slack's signature.");
 
     if content_str.contains("json") {
 
@@ -115,16 +184,21 @@ async fn normal_handler(req: HttpRequest, body: String, state: web::Data<AppStat
 }
 
 fn main() -> std::io::Result<()> {
-    let secret_token = match env::var("SLACK_BOT_TOKEN") {
+    let bot_token = match env::var("SLACK_BOT_TOKEN") {
         Ok(val) => val,
         Err(_e) => panic!("Secret bot token is not given."),
     };
-    println!("{:?}", secret_token);
+    println!("{:?}", bot_token);
+
+    let signing_secret = match env::var("SLACK_SIGNING_SECRET") {
+        Ok(val) => val,
+        Err(_e) => panic!("Secret bot token is not given."),
+    };
     
     let system = System::new("slack");
 
     let slack_event_actor = SyncArbiter::start(1, move || SlackEventActor {
-        secret_token: secret_token.clone(),
+        bot_token: bot_token.clone(),
         slack_client: reqwest::blocking::Client::new(),
     });
 
@@ -147,6 +221,7 @@ fn main() -> std::io::Result<()> {
             App::new()
                 .data(AppState {
                     sender: slack_event_actor.clone(),
+                    signing_secret: signing_secret.clone(),
                 })
                 .route("/", web::post().to(normal_handler))
                 .route("/", web::get().to(normal_handler))
